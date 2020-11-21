@@ -145,10 +145,43 @@ def linear_to_db(s1_read):
     return s1_read
 
 
+def add_land_cover(s1_read):
+    """
+    使用AddLandCover GPF module自动下载GlobCover
+    :param s1_read:
+    :return:
+    """
+    parameters = snappy.HashMap()
+    parameters.put("landCoverNames", "GlobCover")
+    mask_with_land_cover = snappy.GPF.createProduct('AddLandCover', parameters, s1_read)
+
+    return mask_with_land_cover
+
+
+def generate_binary_water(s1_read):
+    """
+    依靠GlobCover的分类来生成水体
+    :param s1_read:
+    :return:
+    """
+    BandDescriptor = snappy.jpy.get_type('org.esa.snap.core.gpf.common.BandMathsOp$BandDescriptor')
+    parameters = snappy.HashMap()
+    targetBand = BandDescriptor()
+    targetBand.name = 'BinaryWater'
+    targetBand.type = 'uint8'
+    targetBand.expression = '(land_cover_GlobCover == 210) ? 0 : 1'
+    targetBands = snappy.jpy.array('org.esa.snap.core.gpf.common.BandMathsOp$BandDescriptor', 1)
+    targetBands[0] = targetBand
+    parameters.put('targetBands', targetBands)
+    water_mask = snappy.GPF.createProduct('BandMaths', parameters, s1_read)
+
+    return water_mask
+
+
 def sentinel_1_prerprocess(input_s1_files: Union[str, list], output_directory: str,
                            sub=True, subsetx=10000, subsety=7000, subsetw=10000, subseth=10000,
-                           applyOF=True, bnr=True, removeTN=True, cal=True,
-                           speckleFl=True, terrainC=True, L2dB=True, saveFormat='GeoTIFF')->None:
+                           applyOF=True, bnr=True, removeTN=True, cal=True,speckleFl=True,
+                           terrainC=True, L2dB=True, saveFormat='GeoTIFF', waterMask=False)->None:
     """
     使用snappy对Sentient-1GRD数据进行预处理
     :param input_s1_files: 读入文件路径
@@ -205,6 +238,10 @@ def sentinel_1_prerprocess(input_s1_files: Union[str, list], output_directory: s
         if L2dB:
             s1_read = linear_to_db(s1_read)
 
+        if waterMask:
+            s1_read = add_land_cover(s1_read)
+            s1_read = generate_binary_water(s1_read)
+
         # 保存为GeoTIFF格式
         saveF = saveFormat
         output_name = output_directory + i
@@ -223,7 +260,7 @@ if __name__ == '__main__':
     input_s1_files = sorted(list(iglob(os.path.join(product_path, '**', '*S1*.zip'), recursive=True)))
 
     # 只进行地形校正和辐射校正
-    sentinel_1_prerprocess(input_s1_files, '/home/Tuotianyu/S1_ARD/paper_based_method',
-                           applyOF=False, bnr=False, removeTN=False, speckleFl=False, L2dB=False)
+    sentinel_1_prerprocess(input_s1_files, '/home/Tuotianyu/S1_ARD/add_water_mask',
+                           applyOF=False, bnr=False, removeTN=False, speckleFl=False, L2dB=False, waterMask=True)
 
 
