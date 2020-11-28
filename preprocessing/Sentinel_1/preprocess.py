@@ -102,10 +102,11 @@ def speckle_filter(s1_read):
     return s1_read
 
 
-def terrain_correction(s1_read):
+def terrain_correction(s1_read, demFile):
     """
     地形校正
     :param s1_read:
+    :param demFile:
     :return:
     """
     # 地形校正需要获取投影参数WKT文本表示
@@ -117,8 +118,15 @@ def terrain_correction(s1_read):
                   AXIS["Geodetic longitude", EAST], 
                   AXIS["Geodetic latitude", NORTH]]"""
     parameters = snappy.HashMap()
-    # 使用‘SRTM 3Sec’DEM
-    parameters.put('deName', 'SRTM 3Sec')
+    if demFile:
+        parameters.put('deName', 'External DEM')
+        parameters.put('externalDEMFile', demFile)
+        parameters.put('externalDEMNoDataValue', 0.0)
+        print('using external DEM file')
+    else:
+        # 使用‘SRTM 3Sec’DEM
+        parameters.put('deName', 'SRTM 3Sec')
+        print('using SRTM 3Sec DEM')
     parameters.put('imgResamplingMethod', 'BILINEAR_INTERPOLATION')
     # 设置分辨率
     parameters.put('pixelSpacingInMeter', 10.0)
@@ -174,14 +182,30 @@ def generate_binary_water(s1_read):
     targetBands[0] = targetBand
     parameters.put('targetBands', targetBands)
     water_mask = snappy.GPF.createProduct('BandMaths', parameters, s1_read)
+    print('get GlobCover water mask!')
 
     return water_mask
+
+
+def land_sea_mask(s1_read):
+    """
+    :param s1_read:
+    :return:
+    """
+    parameters = snappy.HashMap()
+    parameters.put('landMask', False)
+    parameters.put('useSRTM', True)
+    landSeaMask = snappy.GPF.createProduct('Land-Sea-Mask', parameters, s1_read)
+    print('mask the sea')
+
+    return landSeaMask
 
 
 def sentinel_1_prerprocess(input_s1_files: Union[str, list], output_directory: str,
                            sub=True, subsetx=10000, subsety=7000, subsetw=10000, subseth=10000,
                            applyOF=True, bnr=True, removeTN=True, cal=True,speckleFl=True,
-                           terrainC=True, L2dB=True, saveFormat='GeoTIFF', waterMask=False)->None:
+                           terrainC=True, L2dB=True, saveFormat='GeoTIFF', waterMask=False,
+                           demFile=None, landSeaMask=False)->None:
     """
     使用snappy对Sentient-1GRD数据进行预处理
     :param input_s1_files: 读入文件路径
@@ -199,6 +223,7 @@ def sentinel_1_prerprocess(input_s1_files: Union[str, list], output_directory: s
     :param terrainC: 是否进行地形校正，默认为是
     :param L2dB: 对否分贝化，默认为是
     :param saveFormat: 存储的格式，默认为GeoTiff
+    :param demFile: 外部DEM文件，可用于地形校正
     :return:
     """
 
@@ -232,15 +257,19 @@ def sentinel_1_prerprocess(input_s1_files: Union[str, list], output_directory: s
 
         # 地形校正操作
         if terrainC:
-            s1_read = terrain_correction(s1_read)
+            s1_read = terrain_correction(s1_read, demFile)
 
         # 分贝化
         if L2dB:
             s1_read = linear_to_db(s1_read)
 
+        # 使用GlobCover生成水体掩膜
         if waterMask:
             s1_read = add_land_cover(s1_read)
             s1_read = generate_binary_water(s1_read)
+
+        if landSeaMask:
+            s1_read = land_sea_mask(s1_read)
 
         # 保存为GeoTIFF格式
         saveF = saveFormat
@@ -260,7 +289,10 @@ if __name__ == '__main__':
     input_s1_files = sorted(list(iglob(os.path.join(product_path, '**', '*S1*.zip'), recursive=True)))
 
     # 只进行地形校正和辐射校正
-    sentinel_1_prerprocess(input_s1_files, '/home/Tuotianyu/S1_ARD/add_water_mask',
-                           applyOF=False, bnr=False, removeTN=False, speckleFl=False, L2dB=False, waterMask=True)
+    # 使用了外部的DEM
+    # Mask the Sea
+    sentinel_1_prerprocess(input_s1_files, '/home/Tuotianyu/S1_ARD/landSeaMask',
+                           applyOF=False, bnr=False, removeTN=False, speckleFl=False, L2dB=False,
+                           demFile=r'srtm_60_07.zip', landSeaMask=True)
 
 
